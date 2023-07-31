@@ -4,9 +4,28 @@ services:
     image: redis:7-alpine
     ports:
       - '6379:6379'
+    expose:
+      - 6379
     command: redis-server --save 20 1 --loglevel warning --requirepass eYVX7EwVmmxKPCDmwMtyKVge8oLd2t81
     volumes:
       - redis:/data
+    networks:
+      - rate-limiter-net
+  ecom-market-rate-limiter:
+    build:
+      dockerfile: Dockerfile
+    ports:
+      - '8080:8080'
+    expose:
+      - 8080
+    networks:
+      - rate-limiter-net
+    environment:
+      - spring.data.redis.host=redis
+    depends_on:
+      - redis
 volumes:
   redis:
     driver: local
+networks:
+  rate-limiter-net:
