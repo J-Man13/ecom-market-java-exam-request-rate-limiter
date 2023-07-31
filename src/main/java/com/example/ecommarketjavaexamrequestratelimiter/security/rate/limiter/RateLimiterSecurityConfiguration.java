@@ -18,14 +18,14 @@ import org.springframework.web.servlet.HandlerExceptionResolver;
 @Configuration
 @EnableWebSecurity
 public class RateLimiterSecurityConfiguration {
-    private final String[] arrayOfStrings;
+    private final String[] rateLimitedEndpoints;
     private final RateLimiterFilter rateLimiterFilter;
 
 
-    public RateLimiterSecurityConfiguration(@Value("${rate.limited.endpoints}") String[] arrayOfStrings,
+    public RateLimiterSecurityConfiguration(@Value("${rate.limited.endpoints}") String[] rateLimitedEndpoints,
                                             @Qualifier("handlerExceptionResolver") HandlerExceptionResolver resolver,
                                             RateLimitService rateLimitService) {
-        this.arrayOfStrings = arrayOfStrings;
+        this.rateLimitedEndpoints = rateLimitedEndpoints;
         this.rateLimiterFilter = new RateLimiterFilter(resolver, rateLimitService);
     }
 
@@ -36,7 +36,7 @@ public class RateLimiterSecurityConfiguration {
                 .cors(AbstractHttpConfigurer::disable)
                 .headers(httpSecurityHeadersConfigurer -> httpSecurityHeadersConfigurer.httpStrictTransportSecurity(HeadersConfigurer.HstsConfig::disable))
                 .httpBasic(AbstractHttpConfigurer::disable)
-                .securityMatcher(arrayOfStrings)
+                .securityMatcher(rateLimitedEndpoints)
                 .addFilterAt(rateLimiterFilter, BasicAuthenticationFilter.class)
                 .sessionManagement(manager -> manager.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .build();
