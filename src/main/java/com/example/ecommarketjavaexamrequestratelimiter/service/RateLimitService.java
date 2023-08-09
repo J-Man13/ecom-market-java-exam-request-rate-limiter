@@ -1,60 +1,68 @@
 package com.example.ecommarketjavaexamrequestratelimiter.service;
 
 import com.example.ecommarketjavaexamrequestratelimiter.exception.RateLimitExceededException;
-import com.example.ecommarketjavaexamrequestratelimiter.model.entity.reddis.BlockedHost;
-import com.example.ecommarketjavaexamrequestratelimiter.model.entity.reddis.IncomingRequest;
-import com.example.ecommarketjavaexamrequestratelimiter.repository.BlockedHostRepository;
-import com.example.ecommarketjavaexamrequestratelimiter.repository.IncomingRequestRepository;
-import com.example.ecommarketjavaexamrequestratelimiter.util.CommonUtil;
+import com.example.ecommarketjavaexamrequestratelimiter.model.BlockedHost;
+import com.example.ecommarketjavaexamrequestratelimiter.model.IncomingRequest;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
+import java.util.concurrent.*;
 
 @Service
+@Slf4j
 public class RateLimitService {
-    private final IncomingRequestRepository incomingRequestRepository;
-    private final BlockedHostRepository blockedHostRepository;
+    private final ConcurrentLinkedQueue<IncomingRequest> incomingRequests;
+    private final ConcurrentHashMap<String,BlockedHost> ipBlockedHostMap;
     private final Long rateLimit;
     private final Long rateLimitPeriodMinutes;
-    private final Long blockHostPeriodMinutes;
+    private final Long hostBlockPeriodMinutes;
 
 
-    public RateLimitService(IncomingRequestRepository incomingRequestRepository,
-                            BlockedHostRepository blockedHostRepository,
-                            @Value("${rate.limit}") long rateLimit,
+    public RateLimitService(@Value("${rate.limit}") long rateLimit,
                             @Value("${rate.limit.period.minutes}") long rateLimitPeriodMinutes,
-                            @Value("${host.block.period.minutes}") long blockHostPeriodMinutes) {
-        this.incomingRequestRepository = incomingRequestRepository;
-        this.blockedHostRepository = blockedHostRepository;
+                            @Value("${host.block.period.minutes}") long hostBlockPeriodMinutes) {
+        incomingRequests = new ConcurrentLinkedQueue<>();
+        ipBlockedHostMap = new ConcurrentHashMap<>();
         this.rateLimit = rateLimit;
         this.rateLimitPeriodMinutes = rateLimitPeriodMinutes;
-        this.blockHostPeriodMinutes = blockHostPeriodMinutes;
+        this.hostBlockPeriodMinutes = hostBlockPeriodMinutes;
     }
 
     public IncomingRequest saveIncomingRequest(IncomingRequest incomingRequest) {
-        if (blockedHostRepository.findByIp(incomingRequest.getRequesterIp()).isPresent()) {
+        String requesterIp = incomingRequest.getRequesterIp();
+        String path = incomingRequest.getPath();
+        if (ipBlockedHostMap.containsKey(requesterIp)) {
             throw new RateLimitExceededException("Rate limit has been exceeded for requesting host");
         }
-        long numberOfAttemptsHostToPathPerPeriod = incomingRequestRepository.findByPathAndRequesterIp(
-                        incomingRequest.getPath(),
-                        incomingRequest.getRequesterIp()
+        incomingRequest.setCreated(LocalDateTime.now());
+        incomingRequests.add(incomingRequest);
+        long numberOfAttemptsHostToPathPerPeriod = incomingRequests.stream()
+                .filter(request -> request.getRequesterIp().equals(requesterIp)
+                        && request.getPath().equals(path)
+                        && request.getCreated().plusMinutes(rateLimitPeriodMinutes).isAfter(LocalDateTime.now())
                 )
-                .stream()
-                .filter(request -> CommonUtil.dateIsBetween(
-                        request.getCreated(),
-                        LocalDateTime.now().minusMinutes(rateLimitPeriodMinutes),
-                        LocalDateTime.now()
-                ))
                 .count();
         if (numberOfAttemptsHostToPathPerPeriod >= rateLimit) {
             BlockedHost blockedHost = new BlockedHost();
-            blockedHost.setIp(incomingRequest.getRequesterIp());
-            blockedHost.setTtlInMinutes(blockHostPeriodMinutes);
-            blockedHostRepository.save(blockedHost);
+            blockedHost.setIp(requesterIp);
+            blockedHost.setCreated(LocalDateTime.now());
+            ipBlockedHostMap.put(requesterIp, blockedHost);
         }
-        incomingRequest.setCreated(LocalDateTime.now());
-        incomingRequest.setTtlInMinutes(rateLimitPeriodMinutes);
-        return incomingRequestRepository.save(incomingRequest);
+        return incomingRequest;
+    }
+
+    @Scheduled(fixedDelayString = "${rate.limit.period.minutes}", timeUnit = TimeUnit.MINUTES)
+    public void cleanUpIncomingRequests() {
+        log.info("performing clean up of incoming requests");
+        incomingRequests.removeIf(request -> request.getCreated().plusMinutes(rateLimitPeriodMinutes).isBefore(LocalDateTime.now()));
+    }
+
+    @Scheduled(fixedDelayString = "${host.block.period.minutes}", timeUnit = TimeUnit.MINUTES)
+    public void cleanUpBlockedHosts() {
+        log.info("performing clean up of blocked hosts");
+        ipBlockedHostMap.entrySet().removeIf(entry -> entry.getValue().getCreated().plusMinutes(hostBlockPeriodMinutes).isBefore(LocalDateTime.now()));
     }
 }

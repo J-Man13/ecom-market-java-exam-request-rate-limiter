@@ -1,6 +1,6 @@
 package com.example.ecommarketjavaexamrequestratelimiter.security.rate.limiter;
 
-import com.example.ecommarketjavaexamrequestratelimiter.model.entity.reddis.IncomingRequest;
+import com.example.ecommarketjavaexamrequestratelimiter.model.IncomingRequest;
 import com.example.ecommarketjavaexamrequestratelimiter.service.RateLimitService;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
